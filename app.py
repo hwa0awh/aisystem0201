@@ -23,14 +23,18 @@ app = Flask(__name__, static_folder="static")
 # =============================================
 # 설정값 (여기만 수정하세요)
 # =============================================
-ETRI_API_KEY  = "YOUR_ETRI_API_KEY"
-CLOVA_API_KEY = "YOUR_CLOVA_API_KEY"
+ETRI_API_KEY   = ""
+CLOVA_API_KEY  = ""
+STDICT_API_KEY = ""   # 표준국어대사전 OpenAPI 키
 # =============================================
 
 ETRI_URL_KOR  = "http://epretx.etri.re.kr:8000/api/WiseASR_PronunciationKor"
 ETRI_URL_ENG  = "http://epretx.etri.re.kr:8000/api/WiseASR_Pronunciation"
 CLOVA_URL     = "https://clovastudio.stream.ntruss.com/v3/chat-completions/HCX-005"
 CLOVA_URL_VIS = "https://clovastudio.stream.ntruss.com/v1/openai/chat/completions"  # OpenAI 호환
+STDICT_SEARCH_URL = "https://stdict.korean.go.kr/api/search.do"
+STDICT_VIEW_URL   = "https://stdict.korean.go.kr/api/view.do"
+STDICT_CERTKEY    = "9051"   # 표준국어대사전 고정 certkey_no
 
 MAX_TOKENS_PER_CALL = 4096
 SLIDES_PER_CHUNK    = 5   # 대본 생성 시 한 번에 처리할 슬라이드 수
@@ -424,55 +428,95 @@ def pptx_to_images(file_bytes):
         return [open(f, "rb").read() for f in image_files]
 
 
-# ── PPTX 대본 생성 API ──────────────────────
+# ── PDF 페이지별 텍스트 추출 ─────────────────
+def extract_pdf_text(file_bytes):
+    import pdfplumber
+    pages = []
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        for i, page in enumerate(pdf.pages, 1):
+            text = (page.extract_text() or "").strip()
+            pages.append((i, text if text else "(텍스트 없음)"))
+    return pages
+
+
+# ── PDF → 이미지 변환 (스캔 PDF용) ───────────
+def pdf_to_images(file_bytes):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pdf_path = os.path.join(tmpdir, "input.pdf")
+        with open(pdf_path, "wb") as f:
+            f.write(file_bytes)
+        subprocess.run(
+            ["pdftoppm", "-jpeg", "-r", "72", pdf_path, os.path.join(tmpdir, "page")],
+            capture_output=True, timeout=300
+        )
+        image_files = sorted(glob.glob(os.path.join(tmpdir, "page-*.jpg")))
+        return [open(f, "rb").read() for f in image_files]
+
+
+# ── PPTX / PDF 대본 생성 API ─────────────────
 @app.route("/api/pptx-generate", methods=["POST"])
 def pptx_generate():
     try:
-        pptx_file = request.files.get("pptx")
-        duration  = int(request.form.get("duration", 5))
-        audience  = request.form.get("audience", "일반 직장인")
-        style     = request.form.get("style", "격식체")
-        extra     = request.form.get("extra", "")
+        upload_file = request.files.get("pptx")
+        duration    = int(request.form.get("duration", 5))
+        audience    = request.form.get("audience", "일반 직장인")
+        style       = request.form.get("style", "격식체")
+        extra       = request.form.get("extra", "")
 
-        if not pptx_file:
-            return jsonify({"error": "PPTX 파일이 없습니다."}), 400
-        if not pptx_file.filename.lower().endswith(".pptx"):
-            return jsonify({"error": ".pptx 파일만 업로드 가능합니다."}), 400
+        if not upload_file:
+            return jsonify({"error": "파일이 없습니다."}), 400
 
-        file_bytes = pptx_file.read()
+        filename   = upload_file.filename.lower()
+        file_bytes = upload_file.read()
+        is_pdf     = filename.endswith(".pdf")
+        is_pptx    = filename.endswith(".pptx")
 
-        # 1단계: python-pptx로 텍스트 추출
-        slides = []
-        try:
-            slides = extract_pptx_text(file_bytes)
-        except Exception:
-            traceback.print_exc()
+        if not is_pdf and not is_pptx:
+            return jsonify({"error": ".pptx 또는 .pdf 파일만 업로드 가능합니다."}), 400
 
-        # 2단계: 텍스트 없으면 비전 AI로 병렬 추출
-        has_content = any(text != "(텍스트 없음)" for _, text in slides)
-        use_vision  = not has_content
+        slides     = []
+        use_vision = False
 
-        if use_vision:
-            print("[비전 추출] 이미지 기반 슬라이드 감지 → 병렬 텍스트 추출 시작")
-            images    = pptx_to_images(file_bytes)
-            args_list = [(i + 1, img) for i, img in enumerate(images)]
+        if is_pptx:
+            # PPTX: python-pptx 시도 → 실패 시 비전
+            try:
+                slides = extract_pptx_text(file_bytes)
+            except Exception:
+                traceback.print_exc()
 
-            # VISION_WORKERS개씩 병렬 처리 (순서 보장)
-            with ThreadPoolExecutor(max_workers=VISION_WORKERS) as executor:
-                results = list(executor.map(extract_text_from_image, args_list))
+            has_content = any(text != "(텍스트 없음)" for _, text in slides)
+            use_vision  = not has_content
 
-            # 순서 정렬 후 slides 구성
-            slides = sorted(results, key=lambda x: x[0])
-            print(f"[비전 추출] 전체 {len(slides)}장 완료")
+            if use_vision:
+                print("[비전 추출] PPTX 이미지 기반 → 병렬 텍스트 추출")
+                images    = pptx_to_images(file_bytes)
+                args_list = [(i + 1, img) for i, img in enumerate(images)]
+                with ThreadPoolExecutor(max_workers=VISION_WORKERS) as executor:
+                    results = list(executor.map(extract_text_from_image, args_list))
+                slides = sorted(results, key=lambda x: x[0])
+
+        elif is_pdf:
+            # PDF: pdfplumber 시도 → 텍스트 없으면 비전
+            try:
+                slides = extract_pdf_text(file_bytes)
+            except Exception:
+                traceback.print_exc()
+
+            has_content = any(text != "(텍스트 없음)" for _, text in slides)
+            use_vision  = not has_content
+
+            if use_vision:
+                print("[비전 추출] PDF 스캔본 감지 → 이미지 변환 후 텍스트 추출")
+                images    = pdf_to_images(file_bytes)
+                args_list = [(i + 1, img) for i, img in enumerate(images)]
+                with ThreadPoolExecutor(max_workers=VISION_WORKERS) as executor:
+                    results = list(executor.map(extract_text_from_image, args_list))
+                slides = sorted(results, key=lambda x: x[0])
 
         if not slides:
-            return jsonify({"error": "슬라이드 내용을 읽을 수 없습니다."}), 400
+            return jsonify({"error": "내용을 읽을 수 없습니다."}), 400
 
-        extracted_text = "\n".join(
-            f"[{num}페이지]\n{text}" for num, text in slides
-        )
-
-        # 3단계: 슬라이드별 대본 생성
+        extracted_text = "\n".join(f"[{num}페이지]\n{text}" for num, text in slides)
         result, status = generate_script_by_slides(slides, duration, audience, style, extra)
 
         if status == 200:
@@ -481,6 +525,348 @@ def pptx_generate():
             result["used_vision"]    = use_vision
 
         return jsonify(result), status
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ── 발음 코칭용 파일 텍스트 추출 API ──────────
+@app.route("/api/extract-script", methods=["POST"])
+def extract_script():
+    try:
+        upload_file = request.files.get("file")
+        if not upload_file:
+            return jsonify({"error": "파일이 없습니다."}), 400
+
+        filename   = upload_file.filename.lower()
+        file_bytes = upload_file.read()
+
+        if filename.endswith(".txt"):
+            text = file_bytes.decode("utf-8", errors="ignore").strip()
+
+        elif filename.endswith(".docx"):
+            from docx import Document
+            doc   = Document(io.BytesIO(file_bytes))
+            text  = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+        elif filename.endswith(".pdf"):
+            import pdfplumber
+            lines = []
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        lines.append(t.strip())
+            text = "\n".join(lines)
+
+        else:
+            return jsonify({"error": ".txt .docx .pdf 파일만 지원합니다."}), 400
+
+        if not text:
+            return jsonify({"error": "파일에서 텍스트를 추출할 수 없습니다."}), 400
+
+        return jsonify({"text": text}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ── 대본 docx 다운로드 ────────────────────────
+@app.route("/api/download-docx", methods=["POST"])
+def download_docx():
+    try:
+        from docx import Document
+        from flask import send_file
+
+        data   = request.get_json()
+        script = data.get("script", "").strip()
+        title  = data.get("title", "발표대본")
+
+        if not script:
+            return jsonify({"error": "대본 내용이 없습니다."}), 400
+
+        doc = Document()
+        doc.add_heading(title, level=1)
+        for line in script.split("\n"):
+            doc.add_paragraph(line)
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=f"{title}.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ── 대본 PDF 다운로드 (CIDFont 한글 지원) ────
+@app.route("/api/download-pdf", methods=["POST"])
+def download_pdf():
+    try:
+        from flask import send_file
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas as rl_canvas
+
+        data   = request.get_json()
+        script = data.get("script", "").strip()
+        title  = data.get("title", "발표대본")
+
+        if not script:
+            return jsonify({"error": "대본 내용이 없습니다."}), 400
+
+        # 한글 CID 폰트 등록
+        font_name = "HYSMyeongJo-Medium"
+        pdfmetrics.registerFont(UnicodeCIDFont(font_name))
+
+        W, H      = A4
+        margin    = 50        # pt
+        col_w     = W - margin * 2
+        line_h    = 18
+        font_sz   = 11
+        title_sz  = 16
+
+        buf = io.BytesIO()
+        c   = rl_canvas.Canvas(buf, pagesize=A4)
+
+        def start_page(is_first=False):
+            c.setFont(font_name, font_sz)
+            y = H - margin
+            if is_first:
+                # 제목
+                c.setFont(font_name, title_sz)
+                c.drawString(margin, y, title)
+                c.setFont(font_name, font_sz)
+                y -= title_sz + 16
+            return y
+
+        y = start_page(is_first=True)
+
+        for para in script.split("\n"):
+            if not para.strip():
+                y -= line_h * 0.5
+                if y < margin:
+                    c.showPage()
+                    y = start_page()
+                continue
+
+            # 글자 단위 줄바꿈
+            line = ""
+            for ch in para:
+                if c.stringWidth(line + ch, font_name, font_sz) > col_w:
+                    if y < margin + line_h:
+                        c.showPage()
+                        y = start_page()
+                    c.drawString(margin, y, line)
+                    y -= line_h
+                    line = ch
+                else:
+                    line += ch
+
+            if line:
+                if y < margin + line_h:
+                    c.showPage()
+                    y = start_page()
+                c.drawString(margin, y, line)
+                y -= line_h
+
+            y -= 4  # 단락 간격
+
+        c.save()
+        buf.seek(0)
+
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=f"{title}.pdf",
+            mimetype="application/pdf"
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ── 표준국어대사전 발음 조회 (search → view 2단계) ──
+def lookup_pronunciation(word):
+    """
+    1단계: search.do 로 target_code 획득
+    2단계: view.do 로 pronunciation_info 조회
+    실패하거나 발음 정보 없으면 None 반환
+    """
+    try:
+        # 1단계: target_code 획득
+        search_resp = requests.get(
+            STDICT_SEARCH_URL,
+            params={
+                "key":      STDICT_API_KEY,
+                "q":        word,
+                "req_type": "json",
+            },
+            timeout=5,
+        )
+        if search_resp.status_code != 200:
+            return None
+
+        items = search_resp.json().get("channel", {}).get("item", [])
+        if not items:
+            return None
+
+        target_code = items[0].get("target_code")
+        if not target_code:
+            return None
+
+        # 2단계: view.do 로 발음 정보 조회
+        view_resp = requests.get(
+            STDICT_VIEW_URL,
+            params={
+                "certkey_no": STDICT_CERTKEY,
+                "key":        STDICT_API_KEY,
+                "type_search": "view",
+                "req_type":   "json",
+                "method":     "TARGET_CODE",
+                "q":          target_code,
+            },
+            timeout=5,
+        )
+        if view_resp.status_code != 200:
+            return None
+
+        item = view_resp.json().get("channel", {}).get("item", {})
+        pron_list = item.get("word_info", {}).get("pronunciation_info", [])
+        if pron_list:
+            return pron_list[0].get("pronunciation")
+
+        return None
+
+    except Exception as e:
+        print(f"[사전 API] '{word}' 조회 실패: {e}")
+        return None
+
+
+# ── 발음 잡단 분석 API ──────────────────────────
+@app.route("/api/analyze-pronunciation", methods=["POST"])
+def analyze_pronunciation():
+    import json, re
+    try:
+        data   = request.get_json()
+        script = data.get("script", "").strip()
+        if not script:
+            return jsonify({"error": "대본 텍스트가 없습니다."}), 400
+
+        # 1단계: CLOVA로 발음 주의 단어 목록 추출
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "당신은 한국어 발음 교육 전문가입니다. "
+                    "발표 대본에서 실제로 발음이 표기와 다른 단어만 엄선하여 "
+                    "JSON 배열로만 응답하세요. 설명 텍스트 없이 JSON만 출력하세요."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"""아래 발표 대본에서 발음 주의 단어를 찾아주세요.
+
+[포함 기준 - 반드시 아래 조건을 모두 충족해야 함]
+1. 반드시 대본에 실제로 등장하는 단어만 포함
+2. 표기와 실제 발음이 반드시 달라야 함 (예: 국물→[궁물], 협력→[혐녁], 닫혀→[다쳐])
+3. 연음·경음화·비음화·구개음화 등 음운 변동이 명확히 일어나는 단어
+4. 외래어·전문용어 중 발음이 실제로 헷갈리기 쉬운 것
+
+[제외 기준 - 아래 해당하면 절대 포함하지 말 것]
+- 표기와 발음이 동일한 단어 (예: 추세→[추세], 인식→[인식] 제외)
+- 단순히 어렵거나 긴 단어라도 발음 변동이 없으면 제외
+- 발음 변동이 확실하지 않으면 제외
+
+반드시 아래 JSON 형식으로만 응답 (다른 텍스트 절대 금지):
+[
+  {{"word": "단어", "pronunciation": "[발음]", "reason": "구체적 음운 변동 규칙"}},
+  ...
+]
+
+대본:
+{script[:3000]}"""
+            }
+        ]
+
+        clova_resp, status = call_clova_once(messages, max_tokens=1000)
+        if status != 200:
+            return jsonify({"error": "CLOVA 분석 실패"}), status
+
+        raw        = clova_resp["result"]["message"]["content"].strip()
+        json_match = re.search(r'\[.*\]', raw, re.DOTALL)
+        if not json_match:
+            return jsonify({"error": "분석 결과 파싱 실패", "raw": raw}), 500
+
+        clova_words = json.loads(json_match.group())
+
+        # 2단계: 표준국어대사전 API로 공식 발음 조회 (있으면 덮어씀)
+        highlights = []
+        seen_words = set()  # 중복 단어 제거용
+
+        for item in clova_words:
+            word       = item.get("word", "").strip()
+            clova_pron = item.get("pronunciation", "").strip()
+            reason     = item.get("reason", "")
+
+            # ── 필터 1: 빈 단어 / 중복 제거
+            if not word or word in seen_words:
+                continue
+            seen_words.add(word)
+
+            # ── 필터 2: 대본에 실제로 등장하는지 확인 (0회 등장 제거)
+            positions, start = [], 0
+            while True:
+                idx = script.find(word, start)
+                if idx == -1:
+                    break
+                positions.append({"start": idx, "end": idx + len(word)})
+                start = idx + len(word)
+
+            if not positions:
+                print(f"[발음 분석] '{word}' 대본에 없음 → 제외")
+                continue
+
+            # ── 표준국어대사전으로 공식 발음 조회
+            official = lookup_pronunciation(word)
+
+            if official:
+                pron   = f"[{official}]"
+                source = "표준국어대사전"
+                # ── 필터 3: 사전 발음과 표기가 동일하면 제거
+                if official == word:
+                    print(f"[발음 분석] '{word}' 발음 동일 → 제외")
+                    continue
+            else:
+                pron   = clova_pron
+                source = "AI 분석"
+                # ── 필터 3: CLOVA 발음과 표기가 동일하면 제거
+                # 괄호 제거 후 비교 (예: [인식] → 인식)
+                pron_clean = clova_pron.strip("[]").strip()
+                if pron_clean == word:
+                    print(f"[발음 분석] '{word}' AI 발음 동일 → 제외")
+                    continue
+
+            highlights.append({
+                "word":          word,
+                "pronunciation": pron,
+                "reason":        reason,
+                "source":        source,
+                "positions":     positions,
+            })
+
+        return jsonify({"highlights": highlights, "word_count": len(highlights)}), 200
 
     except Exception as e:
         traceback.print_exc()
