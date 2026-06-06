@@ -1,0 +1,13 @@
+# 1. 의존성 폴더 (무거워서 제외)
+node_modules/
+
+# 2. 환경 변수 파일 (보안/비밀번호 때문에 절대 제외)
+.env
+.env.local
+.env.development
+.env.production
+
+# 3. 빌드 결과물 폴더 (배포할 때만 생기는 임시 파일이라 제외)
+build/
+dist/
+.next/
