@@ -1,0 +1,37 @@
+/* 1. 최상단에 Tailwind v4 엔진 로드 */
+@import "tailwindcss";
+
+/* 2. 테마 확장 영역 */
+@theme {
+  /* 💡 프로젝트의 기본 폰트(sans) 자체를 'Paperlogy'로 지정합니다 ⭐ */
+  --font-sans: "Paperlogy", sans-serif;
+}
+
+/* 3. 로컬 폰트 파일 등록 */
+@font-face {
+  font-family: 'Paperlogy';
+  src: url('./assets/fonts/Paperlogy-4Regular.ttf') format('truetype');
+  font-weight: 400; /* font-normal 기본 본문용 */
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Paperlogy';
+  src: url('./assets/fonts/Paperlogy-5Medium.ttf') format('truetype');
+  font-weight: 500; /* font-medium 서브 요소용 */
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Paperlogy';
+  src: url('./assets/fonts/Paperlogy-7Bold.ttf') format('truetype');
+  font-weight: 700; /* font-bold 강조용 */
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Paperlogy';
+  src: url('./assets/fonts/Paperlogy-9Black.ttf') format('truetype');
+  font-weight: 900; /* font-black 대형 타이틀용 */
+  font-style: normal;
+}
