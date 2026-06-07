@@ -1,5 +1,5 @@
 # 🎤 SKOACH
-> speak + coach — 발표 준비의 모든 과정을 AI와 함께
+> SpeaK + coACH — 발표 준비의 모든 과정을 AI와 함께
 
 ## 서비스 소개
 SKOACH는 발표가 두려운 사람들을 위한 AI 발표 코칭 서비스입니다.
@@ -12,17 +12,25 @@ PPTX·PDF를 업로드하거나 가이드라인을 작성하면 AI가 발표 대
 - 🎙 **발음 평가** — 음성 파일 업로드 후 AI가 원본 대본과 비교해 0~5점 채점
 
 ## 기술 스택
-|   분류   | 기술
+| 분류 | 기술
+
 | Frontend | React
+
 | Backend | Node.js + NestJS
-|   A I   | CLOVA HCX-005, ETRI WiseASR
-|  Infra  | GCP, Nginx
+
+| AI | CLOVA HCX-005, ETRI WiseASR
+
+| Infra | GCP, Nginx
 
 ## 팀원
 |  이름  | 역할
+
 | 이화진 | PM
+
 | 여석희 | 사용자 리서치 / 발표
+
 | 김서현 | FE + AI Engine
+
 | 박효원 | BE + DB + 배포
 
 ## 서비스 링크
