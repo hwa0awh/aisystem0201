@@ -327,11 +327,11 @@ def swagger_spec():
 # =============================================
 # 설정값 (여기만 수정하세요)
 # =============================================
-CLOVA_API_KEY        = "nv-31a142f72d024115a79e993fba44ac26DTxx"
-CLOVA_SPEECH_DOMAIN = "skoach"                        # CLOVA Speech 도메인 코드
-CLOVA_SPEECH_SECRET = "f3d3b9adaab44e66881e4ee2f652819e"     # CLOVA Speech Secret (도메인 상세에서 확인)
-CLOVA_SPEECH_INVOKE = "https://clovaspeech-gw.ncloud.com/external/v1/15521/2860e628e44e9f35b5fd996993397d57aa07df249c1d2526bb5d3efdeb26f7dc" # Invoke URL (도메인 상세에서 확인)
-STDICT_API_KEY      = "F9230BC66749F95D198E69265556E16B"   # 표준국어대사전 OpenAPI 키
+CLOVA_API_KEY        = ""
+CLOVA_SPEECH_DOMAIN = ""                        # CLOVA Speech 도메인 코드
+CLOVA_SPEECH_SECRET = ""     # CLOVA Speech Secret (도메인 상세에서 확인)
+CLOVA_SPEECH_INVOKE = "" # Invoke URL (도메인 상세에서 확인)
+STDICT_API_KEY      = ""   # 표준국어대사전 OpenAPI 키
 # =============================================
 CLOVA_URL     = "https://clovastudio.stream.ntruss.com/v3/chat-completions/HCX-005"
 CLOVA_URL_VIS = "https://clovastudio.stream.ntruss.com/v1/openai/chat/completions"  # OpenAI 호환
