@@ -18,6 +18,10 @@ import subprocess
 import tempfile
 import glob
 import traceback
+import smtplib
+import random
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import time
 import bcrypt
 import firebase_admin
@@ -204,6 +208,117 @@ def swagger_spec():
                     },
                 },
             },
+            "/api/users/{user_id}/email": {
+                "patch": {
+                    "tags":    ["users"],
+                    "summary": "이메일 변경 (로그인 상태)",
+                    "parameters": [{"name": "user_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["email", "password"],
+                                    "properties": {
+                                        "email":    {"type": "string", "example": "new@example.com"},
+                                        "password": {"type": "string", "example": "현재비밀번호"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "이메일 변경 성공"},
+                        "400": {"description": "이메일 중복 또는 입력값 오류"},
+                        "401": {"description": "비밀번호 불일치"},
+                        "404": {"description": "사용자 없음"},
+                        "500": {"description": "서버 오류"},
+                    },
+                },
+            },
+            "/api/users/{user_id}/password": {
+                "patch": {
+                    "tags":    ["users"],
+                    "summary": "비밀번호 변경 (로그인 상태)",
+                    "parameters": [{"name": "user_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["old_password", "new_password"],
+                                    "properties": {
+                                        "old_password": {"type": "string", "example": "현재비밀번호"},
+                                        "new_password": {"type": "string", "example": "새비밀번호123"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "비밀번호 변경 성공"},
+                        "400": {"description": "입력값 오류"},
+                        "401": {"description": "현재 비밀번호 불일치"},
+                        "404": {"description": "사용자 없음"},
+                        "500": {"description": "서버 오류"},
+                    },
+                },
+            },
+            "/api/auth/password-reset/request": {
+                "post": {
+                    "tags":    ["auth"],
+                    "summary": "비밀번호 찾기 인증번호 발송 (로그아웃 상태)",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["email"],
+                                    "properties": {
+                                        "email": {"type": "string", "example": "hong@example.com"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "인증번호 이메일 발송 성공"},
+                        "404": {"description": "가입되지 않은 이메일"},
+                        "500": {"description": "서버 오류"},
+                    },
+                },
+            },
+            "/api/auth/password-reset/confirm": {
+                "post": {
+                    "tags":    ["auth"],
+                    "summary": "인증번호 확인 및 새 비밀번호 변경 (로그아웃 상태)",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["email", "code", "new_password"],
+                                    "properties": {
+                                        "email":        {"type": "string", "example": "hong@example.com"},
+                                        "code":         {"type": "string", "example": "123456"},
+                                        "new_password": {"type": "string", "example": "새비밀번호123"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "비밀번호 재설정 성공"},
+                        "400": {"description": "인증번호 불일치 또는 만료"},
+                        "404": {"description": "사용자 없음"},
+                        "500": {"description": "서버 오류"},
+                    },
+                },
+            },
         },
     }
     return jsonify(spec)
@@ -212,17 +327,30 @@ def swagger_spec():
 # =============================================
 # 설정값 (여기만 수정하세요)
 # =============================================
-CLOVA_API_KEY        = ""
-CLOVA_SPEECH_DOMAIN = ""                        # CLOVA Speech 도메인 코드
-CLOVA_SPEECH_SECRET = ""     # CLOVA Speech Secret (도메인 상세에서 확인)
-CLOVA_SPEECH_INVOKE = "" # Invoke URL (도메인 상세에서 확인)
-STDICT_API_KEY      = ""   # 표준국어대사전 OpenAPI 키
+CLOVA_API_KEY        = "nv-31a142f72d024115a79e993fba44ac26DTxx"
+CLOVA_SPEECH_DOMAIN = "skoach"                        # CLOVA Speech 도메인 코드
+CLOVA_SPEECH_SECRET = "f3d3b9adaab44e66881e4ee2f652819e"     # CLOVA Speech Secret (도메인 상세에서 확인)
+CLOVA_SPEECH_INVOKE = "https://clovaspeech-gw.ncloud.com/external/v1/15521/2860e628e44e9f35b5fd996993397d57aa07df249c1d2526bb5d3efdeb26f7dc" # Invoke URL (도메인 상세에서 확인)
+STDICT_API_KEY      = "F9230BC66749F95D198E69265556E16B"   # 표준국어대사전 OpenAPI 키
 # =============================================
 CLOVA_URL     = "https://clovastudio.stream.ntruss.com/v3/chat-completions/HCX-005"
 CLOVA_URL_VIS = "https://clovastudio.stream.ntruss.com/v1/openai/chat/completions"  # OpenAI 호환
 STDICT_SEARCH_URL = "https://stdict.korean.go.kr/api/search.do"
 STDICT_VIEW_URL   = "https://stdict.korean.go.kr/api/view.do"
 STDICT_CERTKEY    = "9051"   # 표준국어대사전 고정 certkey_no
+
+# 발음 조회 인메모리 캐시 (프로세스 재시작 전까지 유지)
+_pronunciation_cache: dict = {}
+
+# 발음 분석 비동기 job 저장소
+# { job_id: { "status": "pending"|"done"|"error", "result": [...], "progress": 0~100 } }
+_analysis_jobs: dict = {}
+GMAIL_ADDRESS  = os.environ.get("GMAIL_ADDRESS", "")
+GMAIL_APP_PW   = os.environ.get("GMAIL_APP_PASSWORD", "")
+
+# 비밀번호 재설정 인증번호 임시 저장소 {email: {code, expires_at}}
+_reset_codes = {}
+
 JWT_SECRET        = os.environ.get("JWT_SECRET", "skoach-secret-key-change-in-production")
 JWT_EXPIRE_HOURS  = 24        # 토큰 만료 시간 (시간 단위)
 
@@ -426,9 +554,30 @@ def generate_script_chunked(base_info, parts, style_info):
     total_prompt_tokens = 0
     total_completion_tokens = 0
 
+    is_casual = any(k in style_info for k in ["편안", "구어체", "친근", "casual", "informal"])
+
+    if is_casual:
+        style_rule = (
+            "말투는 반드시 편안하고 친근한 구어체를 사용하세요.\n"
+            "문장 끝은 '~해요', '~이에요', '~거든요', '~죠', '~할게요' 등 부드러운 종결어미로 마무리하세요.\n"
+            "'~하겠습니다', '~드리겠습니다' 같은 격식체 종결어미는 사용하지 마세요.\n"
+            "청중에게 말을 거는 듯한 자연스럽고 따뜻한 톤을 유지하세요."
+        )
+    else:
+        style_rule = (
+            "말투는 반드시 격식체를 사용하세요.\n"
+            "문장 끝은 '~하겠습니다', '~드리겠습니다', '~있습니다', '~하였습니다'로 마무리하세요.\n"
+            "'~이에요', '~해요' 등 비격식 종결어미는 사용하지 마세요.\n"
+            "'본 발표에서는' 같은 문어체 주어 대신 '저희는', '저희 서비스는'을 사용하세요."
+        )
+
     system_msg = {
         "role": "system",
-        "content": "당신은 전문 발표 대본 작가입니다. 지시한 파트만 작성하고 다른 파트는 절대 작성하지 마세요.\n절대 마크다운 문법(**굵게**, *기울임*, # 제목, - 목록 등)을 사용하지 마세요. 순수 텍스트로만 작성하세요."
+        "content": (
+            f"당신은 전문 발표 대본 작가입니다. 지시한 파트만 작성하고 다른 파트는 절대 작성하지 마세요.\n"
+            f"절대 마크다운 문법(**굵게**, *기울임*, # 제목, - 목록 등)을 사용하지 마세요. 순수 텍스트로만 작성하세요.\n\n"
+            f"[말투 규칙]\n{style_rule}"
+        )
     }
 
     for part in parts:
@@ -495,33 +644,38 @@ def generate_script_by_slides(slides, duration, audience, style, extra):
         for num, text in slides
     )
 
+    is_casual = any(k in style for k in ["편안", "구어체", "친근", "casual", "informal"])
+
+    if is_casual:
+        style_rule = (
+            "말투는 반드시 편안하고 친근한 구어체를 사용하세요.\n"
+            "문장 끝은 '~해요', '~이에요', '~거든요', '~죠', '~할게요' 등 부드러운 종결어미로 마무리하세요.\n"
+            "'~하겠습니다', '~드리겠습니다' 같은 격식체 종결어미는 사용하지 마세요.\n"
+            "청중에게 말을 거는 듯한 자연스럽고 따뜻한 톤을 유지하세요."
+        )
+    else:
+        style_rule = (
+            "말투는 반드시 격식체를 사용하세요.\n"
+            "문장 끝은 '~하겠습니다', '~드리겠습니다', '~있습니다', '~하였습니다'로 마무리하세요.\n"
+            "'~이에요', '~해요' 등 비격식 종결어미는 사용하지 마세요.\n"
+            "주어는 '저희는', '저희 서비스는'으로 통일하세요. '본 발표에서는' 같은 문어체 주어는 절대 금지.\n"
+            "문어체·보고서체 표현 금지: '~임을 알 수 있다' → '~라는 것을 확인할 수 있었습니다'"
+        )
+
     system_msg = {
         "role": "system",
         "content": (
             "당신은 대학생 팀 발표를 위한 전문 대본 작가입니다.\n"
             "아래의 말투 원칙을 반드시 지켜 실제 사람이 발표하는 것처럼 자연스러운 구어체 대본을 작성하세요.\n\n"
-            "[말투 원칙]\n"
+            f"[말투 원칙]\n{style_rule}\n\n"
+            "공통 원칙:\n"
             "1. 호흡 단위로 쉼표 삽입: 긴 문장은 의미 단위마다 쉼표(,)로 끊어 발표자가 숨을 쉴 수 있게 작성하세요.\n"
-            "   예) '저희는, 실제 발표 경험이 있는 대학생들을 대상으로 인터뷰를 진행했습니다.'\n"
             "2. 슬라이드 전환 시 청중에게 질문을 던지는 형식으로 자연스럽게 넘어가세요.\n"
-            "   예) '그렇다면 이러한 서비스는 어떤 구조로 구현되었을까요?'\n"
-            "   예) '지금부터 저희 서비스의 전체 시스템 구조에 대해 설명드리겠습니다.'\n"
             "3. 중요한 메시지는 짧은 단문으로 분리해 임팩트를 주세요.\n"
-            "   예) '즉, 저희는 단순히 대본만 생성하는 것이 아니라,\\n실제 발표 연습 과정까지 함께 지원합니다.'\n"
-            "4. 열거 항목은 먼저 전체 구성을 예고한 뒤 '첫 번째는 ~', '두 번째는 ~', '마지막으로 ~' 형식으로 나열하세요.\n"
-            "   예) '발표 순서는 다음과 같습니다. 먼저 ~ 설명드리고, 이후 ~ 소개하겠습니다.'\n"
-            "5. 주어는 '저희는', '저희 서비스는'으로 통일하세요. '본 발표에서는' 같은 문어체 주어는 절대 금지.\n"
-            "6. 문장 끝은 반드시 '~하겠습니다', '~하였습니다', '~드리겠습니다', '~있습니다'로 마무리하세요.\n"
-            "   '~이에요', '~해요' 등 비격식 종결어미는 사용하지 마세요.\n"
-            "7. 문어체·보고서체 표현 금지:\n"
-            "   '본 발표에서는 ~을 살펴보겠습니다' → '오늘은 ~에 대해 말씀드리겠습니다'\n"
-            "   '~임을 알 수 있다' → '~라는 것을 확인할 수 있었습니다'\n"
-            "   '~하여야 한다' → '~해야 합니다'\n"
-            "   '~을 제안한다' → '~을 제안드립니다'\n\n"
-            "반드시 아래 두 가지 원칙을 최우선으로 지키세요.\n"
+            "4. 열거 항목은 먼저 전체 구성을 예고한 뒤 '첫 번째는 ~', '두 번째는 ~', '마지막으로 ~' 형식으로 나열하세요.\n\n"
+            "반드시 아래 원칙을 최우선으로 지키세요.\n"
             "첫째, 슬라이드에 있는 내용만 사용하세요. 슬라이드에 없는 사실, 수치, 예시, 이름은 절대 추가하지 마세요.\n"
             "둘째, 위 말투 원칙에 따라 실제 사람이 청중 앞에서 말하는 것처럼 자연스러운 구어체로 작성하세요.\n"
-            "전체 발표의 흐름과 통일성을 유지하면서 지시한 슬라이드 페이지의 대본만 작성하세요.\n"
             "셋째, **굵게**, *기울임*, # 제목, - 목록 등 마크다운 문법을 절대 사용하지 마세요. 순수 텍스트로만 작성하세요.\n"
             "넷째, 각 페이지 시작은 반드시 [N페이지] 형식으로 표시하고, 페이지 간 빈 줄 하나로 구분하세요. 절대 생략하거나 합치지 마세요."
         )
@@ -535,9 +689,13 @@ def generate_script_by_slides(slides, duration, audience, style, extra):
         is_first  = chunk_idx == 0
         is_last   = chunk_idx == len(chunks) - 1
 
+        next_num  = start_num + 1  # 프롬프트 예시용
         chunk_text = ""
         for num, text in chunk:
-            chunk_text += f"\n[{num}페이지]\n{text}\n"
+            if not text or text in ("(텍스트 없음)", "(이미지 인식 실패)", ""):
+                chunk_text += f"\n[{num}페이지]\n(슬라이드 이미지 인식 불가 - 앞뒤 흐름에 맞게 반드시 대본을 작성하세요. 절대 생략하지 마세요.)\n"
+            else:
+                chunk_text += f"\n[{num}페이지]\n{text}\n"
 
         # 이전 청크 마지막 내용 (연결 고리)
         prev_context = f"\n[이전 대본 마지막 부분 - 여기서 자연스럽게 이어서 작성]\n{last_chunk_tail}" if last_chunk_tail else ""
@@ -559,12 +717,13 @@ def generate_script_by_slides(slides, duration, audience, style, extra):
 
 [작성 규칙]
 1. 반드시 [{start_num}페이지]부터 [{end_num}페이지]까지만 작성
-2. ★★★ 페이지 구분 (절대 원칙)\n   - 반드시 각 페이지 시작에 [{start_num}페이지], [{start_num + 1}페이지] 형태로 페이지 번호를 표시하세요.\n   - 페이지 번호는 절대 생략하거나 합치지 마세요.\n   - 각 페이지 대본은 빈 줄 하나로 구분하세요.\n   - 예시 형식:\n     [{start_num}페이지]\n     (대본 내용)\n\n     [{start_num + 1}페이지]\n     (대본 내용)
+2. ★★★ 페이지 구분 (절대 원칙)\n   - 이번 파트에 포함된 모든 페이지({start_num}~{end_num}페이지)를 반드시 빠짐없이 작성하세요.\n   - 반드시 각 페이지 시작에 [{start_num}페이지], [{next_num}페이지] 형태로 페이지 번호를 표시하세요.\n   - 페이지 번호는 절대 생략하거나 합치지 마세요.\n   - 각 페이지 대본은 빈 줄 하나로 구분하세요.\n   - 예시 형식:\n     [{start_num}페이지]\n     (대본 내용)\n\n     [{next_num}페이지]\n     (대본 내용)
 
 3. ★★ 슬라이드 내용 준수 (절대 원칙)
    - 슬라이드에 명시된 텍스트, 수치, 키워드만 사용하세요.
    - 슬라이드에 없는 사실, 수치, 예시, 이름, 기능을 절대 추가하지 마세요.
    - 슬라이드 내용이 부족하더라도 임의로 내용을 보충하거나 창작하지 마세요.
+   - 단, "(이미지 슬라이드: ...)" 표시된 페이지는 전체 흐름과 앞뒤 내용을 고려해 자연스럽게 작성하세요.
    - 위반 예시(절대 금지): 슬라이드에 없는 "예를 들어 A사는 ~", "연구에 따르면 ~", "최근 ~% 증가" 등
 
 4. ★★ 구어체 사용 (절대 원칙)
@@ -598,6 +757,12 @@ def generate_script_by_slides(slides, duration, audience, style, extra):
         usage = data["result"]["usage"]
         total_prompt_tokens     += usage["promptTokens"]
         total_completion_tokens += usage["completionTokens"]
+        # 누락된 페이지 검증 및 보완
+        for num, text in chunk:
+            if not re.search(rf'\[{num}페이지\]', chunk_script):
+                print(f"[대본 생성] 경고: {num}페이지 누락 → 강제 삽입")
+                safe_text = text if text and text != "(텍스트 없음)" else "(이미지 슬라이드: 앞뒤 흐름에 맞게 작성)"
+                chunk_script += f"\n\n[{num}페이지]\n{safe_text}에 대한 내용입니다."
         # 첫 페이지 태그가 없으면 강제 추가
         if not re.search(rf'\[{start_num}페이지\]', chunk_script):
             chunk_script = f"[{start_num}페이지]\n\n" + chunk_script
@@ -727,18 +892,25 @@ def generate():
         is_edit_mode = "[현재 대본]" in topic or "[전체 대본]" in topic
 
         if is_edit_mode:
-            # 전체 대본 추출
-            script_match = re.search(r'\[현재 대본\]\n([\s\S]+)', topic)
+            # 전체 대본 추출 — [수정 요청] 이전까지만 파싱 (탐욕적 매칭 방지)
+            script_match = re.search(r'\[현재 대본\]\n([\s\S]+?)(?=\n\[수정 요청\]|$)', topic)
             if not script_match:
-                script_match = re.search(r'\[전체 대본\]\n([\s\S]+?)(?=\n\[지시사항\]|$)', topic)
+                script_match = re.search(r'\[전체 대본\]\n([\s\S]+?)(?=\n\[지시사항\]|\n\[수정 요청\]|$)', topic)
             full_script = script_match.group(1).strip() if script_match else ""
 
             # 수정 요청 추출
             request_match = re.search(r'\[수정 요청\]\n([\s\S]+?)(?=\n\[|$)', topic)
             request_msg = request_match.group(1).strip() if request_match else topic
 
-            # 1순위: 요청에 파트 키워드 명시 ([서론], [본론1], [1페이지] 등)
+            # 1순위: 요청에 파트 키워드 명시 ([서론], [본론1], [1페이지] 또는 "2페이지" 형태)
             part_match = re.search(r'\[(서론|본론\d*|결론|\d+페이지)\]', request_msg)
+            # 대괄호 없이 "N페이지" 숫자만 입력한 경우도 감지
+            if not part_match:
+                num_match = re.search(r'(\d+)\s*페이지', request_msg)
+                if num_match and full_script:
+                    page_num = num_match.group(1)
+                    if re.search(rf'\[{page_num}페이지\]', full_script):
+                        part_match = type('obj', (object,), {'group': lambda self, x: f'[{page_num}페이지]'})()
 
             if part_match and full_script:
                 part = part_match.group(0)
@@ -792,7 +964,7 @@ def generate():
                     data_resp, status = call_clova_once(messages, max_tokens=2048)
                     if status != 200:
                         return jsonify({"error": "파트 수정 실패"}), status
-                    new_part = data_resp["result"]["message"]["content"].strip()
+                    new_part = strip_markdown(data_resp["result"]["message"]["content"].strip())
                     return jsonify({
                         "result": {
                             "message": {"role": "assistant", "content": new_part},
@@ -829,7 +1001,7 @@ def generate():
                     if status != 200:
                         return jsonify({"error": "파트 수정 실패"}), status
 
-                    new_part = data_resp["result"]["message"]["content"].strip()
+                    new_part = strip_markdown(data_resp["result"]["message"]["content"].strip())
                     return jsonify({
                         "result": {
                             "message": {"role": "assistant", "content": new_part},
@@ -841,12 +1013,27 @@ def generate():
             else:
                 # 전체 수정
                 print(f"[수정 모드] 전체 수정: {request_msg}")
-                messages = [
-                    {
-                        "role": "system",
-                        "content": "당신은 발표 대본 수정 전문가입니다. 수정 요청에 맞게 대본을 수정하세요. 파트 구조([서론], [본론1] 등)는 유지하세요."
-                    },
-                    {"role": "user", "content": topic}
+
+                # request_msg가 비어있으면 말투만 변환 (내용 보존)
+                if not request_msg:
+                    style_instruction = f"말투를 '{style}'로 전체 변환하세요. 내용, 구조, 페이지 번호는 절대 바꾸지 마세요."
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": f"당신은 발표 대본 말투 변환 전문가입니다. {style_instruction}"
+                        },
+                        {
+                            "role": "user",
+                            "content": f"{style_instruction}\n\n[대본]\n{full_script}"
+                        }
+                    ]
+                else:
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": "당신은 발표 대본 수정 전문가입니다. 수정 요청에 맞게 대본을 수정하세요. 파트 구조([서론], [본론1] 등)는 유지하세요."
+                        },
+                        {"role": "user", "content": topic}
                 ]
                 data_resp, status = call_clova_once(messages, max_tokens=4096)
                 if status != 200:
@@ -1136,9 +1323,21 @@ def pptx_generate():
                         for idx in image_slide_idxs
                         if idx - 1 < len(pptx_images)
                     ]
+                    # executor.map 대신 submit+as_completed 사용
+                    # → 개별 슬라이드 실패가 전체를 멈추지 않음
                     with ThreadPoolExecutor(max_workers=VISION_WORKERS) as executor:
-                        for v_idx, v_text in executor.map(extract_text_from_image, target_args):
-                            vision_results[v_idx] = v_text
+                        future_map = {
+                            executor.submit(extract_text_from_image, arg): arg[0]
+                            for arg in target_args
+                        }
+                        for future in as_completed(future_map):
+                            try:
+                                v_idx, v_text = future.result()
+                                vision_results[v_idx] = v_text
+                            except Exception as e:
+                                failed_idx = future_map[future]
+                                print(f"[비전 추출] {failed_idx}페이지 최종 실패 (예외): {e}")
+                                vision_results[failed_idx] = "(이미지 인식 실패)"
 
                 # 3) 슬라이드별 최종 텍스트 합성
                 for idx, pptx_text, has_img in raw_slides:
@@ -1239,19 +1438,100 @@ def extract_script():
 def download_docx():
     try:
         from docx import Document
+        from docx.shared import RGBColor, Pt
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
         from flask import send_file
 
-        data   = request.get_json()
-        script = data.get("script", "").strip()
-        title  = data.get("title", "발표대본")
+        data       = request.get_json()
+        script     = data.get("script", "").strip()
+        title      = data.get("title", "발표대본")
+        highlights = data.get("highlights", [])  # [{word, type, positions:[{start,end}]}]
 
         if not script:
             return jsonify({"error": "대본 내용이 없습니다."}), 400
 
+        # 형광펜 색상 매핑 (워드 텍스트 강조 색 이름)
+        # 장단음: 분홍(magenta), 연음: 하늘(cyan), 표기불일치: 노랑(yellow)
+        highlight_color_map = {
+            "장단음":    "magenta",
+            "연음":      "cyan",
+            "표기불일치":"yellow",
+            "음운변동":  "yellow",
+        }
+
+        # 하이라이트할 위치 맵 생성: {start: (end, color)}
+        highlight_map = {}
+        for h in highlights:
+            color = highlight_color_map.get(h.get("type", ""), "yellow")
+            for pos in h.get("positions", []):
+                highlight_map[pos["start"]] = (pos["end"], color)
+
+        def set_highlight(run, color_name):
+            """워드 run에 형광펜(텍스트 강조 색) 적용"""
+            rPr = run._r.get_or_add_rPr()
+            highlight = OxmlElement("w:highlight")
+            highlight.set(qn("w:val"), color_name)
+            rPr.append(highlight)
+
+        def add_highlighted_paragraph(doc, text, h_map):
+            """텍스트에 하이라이트를 적용한 단락 추가"""
+            para = doc.add_paragraph()
+            para.paragraph_format.space_after = Pt(2)
+            i = 0
+            while i < len(text):
+                if i in h_map:
+                    end, color = h_map[i]
+                    run = para.add_run(text[i:end])
+                    set_highlight(run, color)
+                    i = end
+                else:
+                    # 다음 하이라이트 시작점까지 일반 텍스트
+                    next_hl = min((s for s in h_map if s > i), default=len(text))
+                    run = para.add_run(text[i:next_hl])
+                    i = next_hl
+            return para
+
         doc = Document()
-        doc.add_heading(title, level=1)
-        for line in script.split("\n"):
-            doc.add_paragraph(line)
+        # 제목
+        heading = doc.add_heading(title, level=1)
+        heading.runs[0].font.color.rgb = RGBColor(0x2D, 0x2D, 0x2D)
+
+        # 범례 단락 추가
+        if highlights:
+            legend = doc.add_paragraph()
+            legend.add_run("■ 범례: ").bold = True
+            r1 = legend.add_run(" 장단음 ")
+            set_highlight(r1, "magenta")
+            legend.add_run("  ")
+            r2 = legend.add_run(" 연음 ")
+            set_highlight(r2, "cyan")
+            legend.add_run("  ")
+            r3 = legend.add_run(" 표기-발음 불일치 ")
+            set_highlight(r3, "yellow")
+            doc.add_paragraph()
+
+        # 대본을 줄 단위로 처리
+        # highlights의 positions는 전체 script 기준이므로 offset 계산 필요
+        lines = script.split("\n")
+        offset = 0
+        for line in lines:
+            line_end = offset + len(line)
+            # 이 줄에 해당하는 하이라이트만 추출 (offset 기준으로 재계산)
+            line_h_map = {}
+            for start, (end, color) in highlight_map.items():
+                if offset <= start < line_end:
+                    local_start = start - offset
+                    local_end   = min(end, line_end) - offset
+                    line_h_map[local_start] = (local_end, color)
+
+            if line_h_map:
+                add_highlighted_paragraph(doc, line, line_h_map)
+            else:
+                p = doc.add_paragraph(line)
+                p.paragraph_format.space_after = Pt(2)
+
+            offset = line_end + 1  # +1 for "\n"
 
         buf = io.BytesIO()
         doc.save(buf)
@@ -1277,25 +1557,42 @@ def download_pdf():
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.cidfonts import UnicodeCIDFont
         from reportlab.lib.pagesizes import A4
+        from reportlab.lib.colors import Color
         from reportlab.pdfgen import canvas as rl_canvas
 
-        data   = request.get_json()
-        script = data.get("script", "").strip()
-        title  = data.get("title", "발표대본")
+        data       = request.get_json()
+        script     = data.get("script", "").strip()
+        title      = data.get("title", "발표대본")
+        highlights = data.get("highlights", [])
 
         if not script:
             return jsonify({"error": "대본 내용이 없습니다."}), 400
+
+        # 형광펜 색상 매핑 (RGBA)
+        hl_color_map = {
+            "장단음":     Color(1.0, 0.71, 0.86, alpha=0.6),  # 분홍
+            "연음":       Color(0.53, 0.81, 0.98, alpha=0.6),  # 하늘
+            "표기불일치": Color(1.0, 0.95, 0.56, alpha=0.6),  # 노랑
+            "음운변동":   Color(1.0, 0.95, 0.56, alpha=0.6),  # 노랑
+        }
+
+        # positions 맵 생성: {start: (end, color)}
+        highlight_map = {}
+        for h in highlights:
+            color = hl_color_map.get(h.get("type", ""), hl_color_map["표기불일치"])
+            for pos in h.get("positions", []):
+                highlight_map[pos["start"]] = (pos["end"], color)
 
         # 한글 CID 폰트 등록
         font_name = "HYSMyeongJo-Medium"
         pdfmetrics.registerFont(UnicodeCIDFont(font_name))
 
-        W, H      = A4
-        margin    = 50        # pt
-        col_w     = W - margin * 2
-        line_h    = 18
-        font_sz   = 11
-        title_sz  = 16
+        W, H     = A4
+        margin   = 50
+        col_w    = W - margin * 2
+        line_h   = 18
+        font_sz  = 11
+        title_sz = 16
 
         buf = io.BytesIO()
         c   = rl_canvas.Canvas(buf, pagesize=A4)
@@ -1304,32 +1601,81 @@ def download_pdf():
             c.setFont(font_name, font_sz)
             y = H - margin
             if is_first:
-                # 제목
                 c.setFont(font_name, title_sz)
                 c.drawString(margin, y, title)
                 c.setFont(font_name, font_sz)
                 y -= title_sz + 16
+                # 범례
+                if highlights:
+                    legend_y = y
+                    c.setFont(font_name, 9)
+                    c.drawString(margin, legend_y, "■ 범례:  ")
+                    lx = margin + c.stringWidth("■ 범례:  ", font_name, 9)
+                    for label, col in [("장단음", hl_color_map["장단음"]), ("연음", hl_color_map["연음"]), ("표기불일치", hl_color_map["표기불일치"])]:
+                        tw = c.stringWidth(f" {label} ", font_name, 9)
+                        c.setFillColor(col)
+                        c.rect(lx, legend_y - 2, tw, 12, fill=1, stroke=0)
+                        c.setFillColorRGB(0, 0, 0)
+                        c.drawString(lx + 2, legend_y, label)
+                        lx += tw + 8
+                    c.setFont(font_name, font_sz)
+                    y -= 24
             return y
 
+        def draw_highlighted_line(x, y, text, text_start_offset):
+            """한 줄 텍스트를 하이라이트 적용해서 그림"""
+            cx = x
+            i  = 0
+            while i < len(text):
+                abs_pos = text_start_offset + i
+                if abs_pos in highlight_map:
+                    end_abs, color = highlight_map[abs_pos]
+                    end_local = min(end_abs - text_start_offset, len(text))
+                    hl_text = text[i:end_local]
+                    tw = c.stringWidth(hl_text, font_name, font_sz)
+                    c.setFillColor(color)
+                    c.rect(cx, y - 2, tw, font_sz + 2, fill=1, stroke=0)
+                    c.setFillColorRGB(0, 0, 0)
+                    c.drawString(cx, y, hl_text)
+                    cx += tw
+                    i = end_local
+                else:
+                    # 다음 하이라이트까지 일반 텍스트
+                    next_hl = min(
+                        (s - text_start_offset for s in highlight_map if s > abs_pos and s - text_start_offset < len(text)),
+                        default=len(text)
+                    )
+                    plain = text[i:next_hl]
+                    c.setFillColorRGB(0, 0, 0)
+                    c.drawString(cx, y, plain)
+                    cx += c.stringWidth(plain, font_name, font_sz)
+                    i = next_hl
+
         y = start_page(is_first=True)
+        offset = 0  # 전체 script에서의 현재 위치
 
         for para in script.split("\n"):
+            para_len = len(para)
             if not para.strip():
                 y -= line_h * 0.5
                 if y < margin:
                     c.showPage()
                     y = start_page()
+                offset += para_len + 1
                 continue
 
-            # 글자 단위 줄바꿈
+            # 글자 단위 줄바꿈 (하이라이트 offset 유지)
             line = ""
-            for ch in para:
+            line_start = 0  # para 내 현재 줄 시작 위치
+
+            for idx, ch in enumerate(para):
                 if c.stringWidth(line + ch, font_name, font_sz) > col_w:
                     if y < margin + line_h:
                         c.showPage()
                         y = start_page()
-                    c.drawString(margin, y, line)
+                    draw_highlighted_line(margin, y, line, offset + line_start)
                     y -= line_h
+                    line_start = idx
                     line = ch
                 else:
                     line += ch
@@ -1338,10 +1684,11 @@ def download_pdf():
                 if y < margin + line_h:
                     c.showPage()
                     y = start_page()
-                c.drawString(margin, y, line)
+                draw_highlighted_line(margin, y, line, offset + line_start)
                 y -= line_h
 
-            y -= 4  # 단락 간격
+            y -= 4
+            offset += para_len + 1  # +1 for "\n"
 
         c.save()
         buf.seek(0)
@@ -1494,6 +1841,8 @@ def _get_pronunciation_reason(word: str, pronunciation: str) -> str:
 
 # ── 표준국어대사전 발음 조회 (search → view 2단계, 동음이의어 전체 수집) ──
 def lookup_pronunciation(word):
+    if word in _pronunciation_cache:
+        return _pronunciation_cache[word]
     """
     1단계: search.do 로 해당 단어의 모든 항목(동음이의어 포함) target_code 수집
     2단계: 각 target_code 마다 view.do 로 pronunciation_info + 뜻 조회
@@ -1580,10 +1929,12 @@ def lookup_pronunciation(word):
                 "definition":    definition,
             })
 
+        _pronunciation_cache[word] = candidates
         return candidates
 
     except Exception as e:
         print(f"[사전 API] '{word}' 조회 실패: {e}")
+        _pronunciation_cache[word] = []
         return []
 
 
@@ -1643,38 +1994,183 @@ def _resolve_pronunciation_with_clova(word, candidates, context_sentence):
 # ── 발음 분석 API ──────────────────────────
 @app.route("/api/analyze-pronunciation", methods=["POST"])
 def analyze_pronunciation():
-    import re as _re
+    import re as _re, uuid, threading
     try:
         data   = request.get_json()
-        script = data.get("script", "").strip()
+        script = data.get("script", "").strip().replace("\r\n", "\n").replace("\r", "\n")
         if not script:
             return jsonify({"error": "대본 텍스트가 없습니다."}), 400
 
-        # ── 1단계: 대본에서 한국어 단어 전체 추출 (중복 제거) ──
-        # 2글자 이상 한글 단어만 추출 (조사/어미 등 1글자 제외)
-        raw_words = _re.findall(r'[가-힣]{2,}', script)
-        unique_words = list(dict.fromkeys(raw_words))  # 등장 순서 유지하며 중복 제거
+        job_id = str(uuid.uuid4())
+        _analysis_jobs[job_id] = {"status": "pending", "progress": 0, "result": None}
 
-        print(f"[발음 분석] 추출 단어 수: {len(unique_words)}")
+        def run_analysis():
+            try:
+                highlights = _do_analyze(script, job_id)
+                _analysis_jobs[job_id]["result"]   = highlights
+                _analysis_jobs[job_id]["status"]   = "done"
+                _analysis_jobs[job_id]["progress"] = 100
+            except Exception as e:
+                traceback.print_exc()
+                _analysis_jobs[job_id]["status"] = "error"
+                _analysis_jobs[job_id]["error"]  = str(e)
 
-        # ── 단어가 포함된 문장 추출 헬퍼 ──────────────────────
-        # CLOVA 문맥 판단용: 단어가 처음 등장하는 문장(앞뒤 포함 최대 100자)
-        sentences = _re.split(r'[.!?\n]', script)
+        threading.Thread(target=run_analysis, daemon=True).start()
+        return jsonify({"job_id": job_id}), 202
 
-        def get_context_sentence(word):
-            for s in sentences:
-                if word in s:
-                    return s.strip()
-            return script[:100]  # 못 찾으면 대본 앞부분으로 대체
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
-        # ── 2단계: 표준국어대사전 전수조회 (동음이의어 전체 후보 수집) ──
+
+@app.route("/api/analyze-pronunciation/status/<job_id>", methods=["GET"])
+def analyze_pronunciation_status(job_id):
+    job = _analysis_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "job을 찾을 수 없습니다."}), 404
+    if job["status"] == "done":
+        result = job["result"]
+        del _analysis_jobs[job_id]
+        return jsonify({"status": "done", "highlights": result, "word_count": len(result)}), 200
+    if job["status"] == "error":
+        err = job.get("error", "알 수 없는 오류")
+        del _analysis_jobs[job_id]
+        return jsonify({"status": "error", "error": err}), 500
+    # pending: 진행률 + 지금까지 완료된 청크 결과 함께 반환
+    return jsonify({
+        "status":   "pending",
+        "progress": job.get("progress", 0),
+        "chunks":   job.get("chunks", []),
+    }), 200
+
+
+def _do_analyze(script, job_id=None):
+    import re as _re
+
+    def set_progress(p):
+        if job_id and job_id in _analysis_jobs:
+            _analysis_jobs[job_id]["progress"] = p
+
+    def set_chunks(chunks):
+        if job_id and job_id in _analysis_jobs:
+            _analysis_jobs[job_id]["chunks"] = chunks
+
+    # ── 0단계: 대본을 페이지/문단 단위로 분할 ──
+    # [N페이지] 또는 [서론]/[본론X]/[결론] 기준으로 분할
+    chunk_pattern = _re.compile(r'(\[\d+페이지\]|\[서론\]|\[본론\d*\]|\[결론\])')
+    parts = chunk_pattern.split(script)
+
+    # parts: ['앞내용', '[1페이지]', '내용1', '[2페이지]', '내용2', ...]
+    chunks = []  # [(tag, text), ...]
+    if len(parts) <= 1:
+        # 태그 없는 대본 → 전체를 하나의 청크로
+        chunks = [("전체", script)]
+    else:
+        i = 0
+        if parts[0].strip():
+            chunks.append(("전체", parts[0]))
+        for i in range(1, len(parts), 2):
+            tag  = parts[i] if i < len(parts) else ""
+            text = parts[i + 1] if i + 1 < len(parts) else ""
+            if tag or text.strip():
+                chunks.append((tag, tag + text))
+
+    total_chunks = len(chunks)
+    print(f"[발음 분석] 청크 수: {total_chunks}")
+    set_chunks([])
+
+    # ── 공통 헬퍼 ──
+    _josa_pat = _re.compile(
+        r'(을|를|이|가|은|는|에서|에게|로부터|에|의|와|과|도|으로|로|만|부터|까지|처럼|보다|마다|라도|이라도|께서|께|한테|한테서)$'
+    )
+    _skip_words = {"저희", "우리", "이번", "지금", "여기", "오늘", "그리고", "하지만",
+                   "그래서", "따라서", "또한", "특히", "먼저", "마지막", "다음", "이후",
+                   "때문", "위해", "통해", "대한", "관한", "있는", "없는", "하는",
+                   "되는", "같은", "이런", "저런", "그런", "어떤", "모든", "각각"}
+
+    def _has_batchim(word):
+        last = ord(word[-1])
+        return 0xAC00 <= last <= 0xD7A3 and (last - 0xAC00) % 28 != 0
+
+    def extract_words(text):
+        clean = _re.sub(r'\[\d+페이지\]|\[서론\]|\[본론\d*\]|\[결론\]', '', text)
+        raw = []
+        for eojeol in _re.findall(r'[가-힣]+', clean):
+            if len(eojeol) < 2:
+                continue
+            stripped = _josa_pat.sub('', eojeol)
+            word = stripped if len(stripped) >= 2 else eojeol
+            raw.append(word)
+        return [w for w in list(dict.fromkeys(raw))
+                if w not in _skip_words
+                and not _re.search(r'[a-zA-Z0-9]', w)
+                and len(w) >= 2
+                and _has_batchim(w)]
+
+    def get_context(word, text):
+        for s in _re.split(r'[.!?\n]', text):
+            if word in s:
+                return s.strip()
+        return text[:100]
+
+    def build_highlights(word_candidates, chunk_text):
+        highlights  = []
+        seen_words  = set()
+        for word, candidates in word_candidates.items():
+            if word in seen_words:
+                continue
+            seen_words.add(word)
+            unique_prons = list(dict.fromkeys(c["pronunciation"] for c in candidates))
+            if len(unique_prons) == 1:
+                official = unique_prons[0]
+            else:
+                context  = get_context(word, chunk_text)
+                print(f"[발음 분석] 동음이의어 '{word}' 후보 {unique_prons} → CLOVA 문맥 판단")
+                official = _resolve_pronunciation_with_clova(word, candidates, context)
+            if not official or official == word:
+                continue
+            positions, start = [], 0
+            while True:
+                idx = script.find(word, start)
+                if idx == -1:
+                    break
+                end    = idx + len(word)
+                before = script[idx - 1] if idx > 0 else ''
+                after  = script[end]     if end < len(script) else ''
+                if _re.match(r'[가-힣]', before) or _re.match(r'[가-힣]', after):
+                    start = end
+                    continue
+                positions.append({"start": idx, "end": end})
+                start = end
+            if not positions:
+                continue
+            reason = _get_pronunciation_reason(word, official)
+            highlights.append({
+                "word":          word,
+                "pronunciation": f"[{official}]",
+                "type":          _get_pronunciation_type(reason),
+                "reason":        reason,
+                "source":        "표준국어대사전",
+                "positions":     positions,
+            })
+        return highlights
+
+    # ── 청크별 순차 분석 ──
+    all_highlights  = []
+    completed_chunks = []
+
+    for chunk_idx, (tag, chunk_text) in enumerate(chunks):
+        print(f"[발음 분석] 청크 {chunk_idx+1}/{total_chunks} 분석 시작: {tag}")
+
+        unique_words = extract_words(chunk_text)
+        print(f"[발음 분석] 청크 단어 수: {len(unique_words)}")
+
+        # 사전 병렬 조회
+        word_candidates = {}
         def lookup_with_word(word):
-            """(word, candidates_list) 튜플 반환"""
             return word, lookup_pronunciation(word)
 
-        # 사전 조회는 병렬로 (stdict API 부하 고려해 워커 3개)
-        word_candidates = {}   # word → candidates
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(lookup_with_word, w): w for w in unique_words}
             for future in as_completed(futures):
                 try:
@@ -1684,68 +2180,34 @@ def analyze_pronunciation():
                 except Exception as e:
                     print(f"[발음 분석] 조회 오류: {e}")
 
-        print(f"[발음 분석] 사전 후보 수집 완료: {len(word_candidates)}개 단어")
+        # highlights 구성
+        chunk_highlights = build_highlights(word_candidates, chunk_text)
+        all_highlights.extend(chunk_highlights)
 
-        # ── 3단계: 동음이의어 발음이 여러 개인 단어만 CLOVA로 문맥 판단 ──
-        # 단일 발음 → 바로 확정 / 복수 발음 → CLOVA 호출
-        highlights  = []
-        seen_words  = set()
-        clova_calls = 0
+        # 청크 완료 → job에 누적 저장 (프론트가 폴링 시 중간 결과 확인 가능)
+        completed_chunks.append({
+            "tag":        tag,
+            "highlights": chunk_highlights,
+        })
+        if job_id and job_id in _analysis_jobs:
+            _analysis_jobs[job_id]["chunks"]   = completed_chunks
+            _analysis_jobs[job_id]["progress"] = int((chunk_idx + 1) / total_chunks * 100)
 
-        for word, candidates in word_candidates.items():
-            if word in seen_words:
-                continue
-            seen_words.add(word)
+        print(f"[발음 분석] 청크 {chunk_idx+1} 완료: {len(chunk_highlights)}개 단어")
 
-            unique_prons = list(dict.fromkeys(c["pronunciation"] for c in candidates))
+    # 전체 대본 등장 순서로 정렬
+    all_highlights.sort(key=lambda h: h["positions"][0]["start"])
+    # 중복 단어 제거 (여러 청크에서 같은 단어가 나올 수 있음)
+    seen = set()
+    deduped = []
+    for h in all_highlights:
+        if h["word"] not in seen:
+            seen.add(h["word"])
+            deduped.append(h)
 
-            if len(unique_prons) == 1:
-                # 발음 후보가 하나 → CLOVA 불필요
-                official = unique_prons[0]
-            else:
-                # 발음 후보가 여러 개 → CLOVA로 문맥 판단
-                context = get_context_sentence(word)
-                print(f"[발음 분석] 동음이의어 '{word}' 후보 {unique_prons} → CLOVA 문맥 판단")
-                official = _resolve_pronunciation_with_clova(word, candidates, context)
-                clova_calls += 1
-
-            # 표기 == 발음이면 스킵 (발음 주의 불필요)
-            if not official or official == word:
-                continue
-
-            # 대본 내 등장 위치 수집
-            positions, start = [], 0
-            while True:
-                idx = script.find(word, start)
-                if idx == -1:
-                    break
-                positions.append({"start": idx, "end": idx + len(word)})
-                start = idx + len(word)
-
-            if not positions:
-                continue
-
-            reason = _get_pronunciation_reason(word, official)
-            pronunciation_type = _get_pronunciation_type(reason)
-            highlights.append({
-                "word":          word,
-                "pronunciation": f"[{official}]",
-                "type":          pronunciation_type,
-                "reason":        reason,
-                "source":        "표준국어대사전",
-                "positions":     positions,
-            })
-
-        # 대본 등장 순서로 정렬
-        highlights.sort(key=lambda h: h["positions"][0]["start"])
-
-        print(f"[발음 분석] 완료 - 주의 단어: {len(highlights)}개 / CLOVA 호출: {clova_calls}회")
-        return jsonify({"highlights": highlights, "word_count": len(highlights)}), 200
-
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
+    print(f"[발음 분석] 전체 완료 - 주의 단어: {len(deduped)}개")
+    set_progress(100)
+    return deduped
 
 
 # ── 사용자 관리 API ───────────────────────────────────────────────────────
@@ -1766,7 +2228,7 @@ def create_user():
 
         # 이메일 중복 확인
         existing = db.collection("users").where(filter=firestore.FieldFilter("email", "==", email)).limit(1).get()
-        if existing:
+        if len(existing) > 0:
             return jsonify({"error": "이미 사용 중인 이메일입니다."}), 400
 
         # 비밀번호 해싱
@@ -1873,7 +2335,7 @@ def login():
             filter=firestore.FieldFilter("email", "==", email)
         ).limit(1).get()
 
-        if not docs:
+        if len(docs) == 0:
             return jsonify({
                 "status":     False,
                 "statusCode": 401,
@@ -1934,6 +2396,195 @@ def login():
             "data":       None,
         }), 500
 
+
+
+
+# ── 이메일 발송 헬퍼 ──────────────────────────────────────────────────────
+def send_email(to_email, subject, body):
+    msg = MIMEMultipart()
+    msg["From"]    = GMAIL_ADDRESS
+    msg["To"]      = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "html", "utf-8"))
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(GMAIL_ADDRESS, GMAIL_APP_PW)
+        smtp.send_message(msg)
+
+
+# ── 이메일 변경 ──────────────────────────────────────────────────────────
+@app.route("/api/users/<user_id>/email", methods=["PATCH"])
+def update_email(user_id):
+    """로그인 상태에서 이메일 변경"""
+    try:
+        data      = request.get_json()
+        new_email = (data.get("email") or "").strip().lower()
+        password  = (data.get("password") or "").strip()
+
+        if not new_email or not password:
+            return jsonify({"status": False, "statusCode": 400, "message": "email과 password는 필수입니다.", "data": None}), 400
+
+        doc_ref = db.collection("users").document(user_id)
+        doc     = doc_ref.get()
+        if not doc.exists:
+            return jsonify({"status": False, "statusCode": 404, "message": "사용자를 찾을 수 없습니다.", "data": None}), 404
+
+        user = doc.to_dict()
+        if not bcrypt.checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
+            return jsonify({"status": False, "statusCode": 401, "message": "비밀번호가 올바르지 않습니다.", "data": None}), 401
+
+        # 이메일 중복 확인
+        existing = db.collection("users").where(filter=firestore.FieldFilter("email", "==", new_email)).limit(1).get()
+        if len(existing) > 0:
+            return jsonify({"status": False, "statusCode": 400, "message": "이미 사용 중인 이메일입니다.", "data": None}), 400
+
+        doc_ref.update({"email": new_email})
+        print(f"[사용자] 이메일 변경: {user_id} → {new_email}")
+        return jsonify({"status": True, "statusCode": 200, "message": "이메일이 변경되었습니다.", "data": None}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": False, "statusCode": 500, "message": str(e), "data": None}), 500
+
+
+# ── 비밀번호 변경 ─────────────────────────────────────────────────────────
+@app.route("/api/users/<user_id>/password", methods=["PATCH"])
+def update_password(user_id):
+    """로그인 상태에서 비밀번호 변경"""
+    try:
+        data         = request.get_json()
+        old_password = (data.get("old_password") or "").strip()
+        new_password = (data.get("new_password") or "").strip()
+
+        if not old_password or not new_password:
+            return jsonify({"status": False, "statusCode": 400, "message": "old_password와 new_password는 필수입니다.", "data": None}), 400
+        if len(new_password) < 6:
+            return jsonify({"status": False, "statusCode": 400, "message": "새 비밀번호는 6자 이상이어야 합니다.", "data": None}), 400
+
+        doc_ref = db.collection("users").document(user_id)
+        doc     = doc_ref.get()
+        if not doc.exists:
+            return jsonify({"status": False, "statusCode": 404, "message": "사용자를 찾을 수 없습니다.", "data": None}), 404
+
+        user = doc.to_dict()
+        if not bcrypt.checkpw(old_password.encode("utf-8"), user["password"].encode("utf-8")):
+            return jsonify({"status": False, "statusCode": 401, "message": "현재 비밀번호가 올바르지 않습니다.", "data": None}), 401
+        if bcrypt.checkpw(new_password.encode("utf-8"), user["password"].encode("utf-8")):
+            return jsonify({"status": False, "statusCode": 400, "message": "새 비밀번호가 현재 비밀번호와 동일합니다.", "data": None}), 400
+
+        hashed_pw = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        doc_ref.update({"password": hashed_pw})
+        print(f"[사용자] 비밀번호 변경: {user_id}")
+        return jsonify({"status": True, "statusCode": 200, "message": "비밀번호가 변경되었습니다.", "data": None}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": False, "statusCode": 500, "message": str(e), "data": None}), 500
+
+
+# ── 비밀번호 재설정 인증번호 발송 ─────────────────────────────────────────
+@app.route("/api/auth/password-reset/request", methods=["POST"])
+def password_reset_request():
+    """로그아웃 상태에서 비밀번호 찾기용 이메일 인증번호 발송"""
+    try:
+        data  = request.get_json()
+        email = (data.get("email") or "").strip().lower()
+
+        if not email:
+            return jsonify({"status": False, "statusCode": 400, "message": "email은 필수입니다.", "data": None}), 400
+
+        # 가입된 이메일인지 확인
+        docs = db.collection("users").where(filter=firestore.FieldFilter("email", "==", email)).limit(1).get()
+        if len(docs) == 0:
+            return jsonify({"status": False, "statusCode": 404, "message": "가입되지 않은 이메일입니다.", "data": None}), 404
+
+        # 6자리 인증번호 생성 (10분 유효)
+        code       = str(random.randint(100000, 999999))
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        _reset_codes[email] = {"code": code, "expires_at": expires_at}
+
+        # 이메일 발송
+        body = f"""
+        <div style="font-family: sans-serif; max-width: 480px; margin: auto;">
+            <h2 style="color: #111;">SKOACH 비밀번호 재설정</h2>
+            <p>아래 인증번호를 입력해주세요. <strong>10분간 유효</strong>합니다.</p>
+            <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #111; margin: 24px 0;">{code}</div>
+            <p style="color: #999; font-size: 12px;">본인이 요청하지 않았다면 이 메일을 무시해주세요.</p>
+        </div>
+        """
+        send_email(email, "[SKOACH] 비밀번호 재설정 인증번호", body)
+
+        print(f"[인증] 비밀번호 재설정 인증번호 발송: {email}")
+        return jsonify({"status": True, "statusCode": 200, "message": "인증번호가 발송되었습니다.", "data": None}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": False, "statusCode": 500, "message": str(e), "data": None}), 500
+
+
+# ── 비밀번호 재설정 인증번호 단독 검증 ─────────────────────────────────────
+@app.route("/api/auth/password-reset/verify", methods=["POST"])
+def password_reset_verify():
+    """인증번호만 검증 (비밀번호 변경 없음) - 프론트 2→3단계 이동 시 호출"""
+    try:
+        data  = request.get_json()
+        email = (data.get("email") or "").strip().lower()
+        code  = (data.get("code")  or "").strip()
+        if not email or not code:
+            return jsonify({"status": False, "statusCode": 400, "message": "email과 code는 필수입니다.", "data": None}), 400
+        stored = _reset_codes.get(email)
+        if not stored:
+            return jsonify({"status": False, "statusCode": 400, "message": "인증번호를 먼저 요청해주세요.", "data": None}), 400
+        if datetime.now(timezone.utc) > stored["expires_at"]:
+            del _reset_codes[email]
+            return jsonify({"status": False, "statusCode": 400, "message": "인증번호가 만료되었습니다.", "data": None}), 400
+        if stored["code"] != code:
+            return jsonify({"status": False, "statusCode": 400, "message": "인증번호가 올바르지 않습니다.", "data": None}), 400
+        return jsonify({"status": True, "statusCode": 200, "message": "인증번호가 확인되었습니다.", "data": None}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": False, "statusCode": 500, "message": str(e), "data": None}), 500
+
+
+# ── 비밀번호 재설정 인증번호 확인 및 새 비밀번호 변경 ────────────────────
+@app.route("/api/auth/password-reset/confirm", methods=["POST"])
+def password_reset_confirm():
+    """로그아웃 상태에서 인증번호 확인 후 새 비밀번호로 변경"""
+    try:
+        data         = request.get_json()
+        email        = (data.get("email")        or "").strip().lower()
+        code         = (data.get("code")         or "").strip()
+        new_password = (data.get("new_password") or "").strip()
+
+        if not email or not code or not new_password:
+            return jsonify({"status": False, "statusCode": 400, "message": "email, code, new_password는 필수입니다.", "data": None}), 400
+        if len(new_password) < 6:
+            return jsonify({"status": False, "statusCode": 400, "message": "새 비밀번호는 6자 이상이어야 합니다.", "data": None}), 400
+
+        # 인증번호 확인
+        stored = _reset_codes.get(email)
+        if not stored:
+            return jsonify({"status": False, "statusCode": 400, "message": "인증번호를 먼저 요청해주세요.", "data": None}), 400
+        if datetime.now(timezone.utc) > stored["expires_at"]:
+            del _reset_codes[email]
+            return jsonify({"status": False, "statusCode": 400, "message": "인증번호가 만료되었습니다.", "data": None}), 400
+        if stored["code"] != code:
+            return jsonify({"status": False, "statusCode": 400, "message": "인증번호가 올바르지 않습니다.", "data": None}), 400
+
+        # 비밀번호 변경
+        docs = db.collection("users").where(filter=firestore.FieldFilter("email", "==", email)).limit(1).get()
+        if len(docs) == 0:
+            return jsonify({"status": False, "statusCode": 404, "message": "사용자를 찾을 수 없습니다.", "data": None}), 404
+
+        hashed_pw = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        docs[0].reference.update({"password": hashed_pw})
+        del _reset_codes[email]
+
+        print(f"[인증] 비밀번호 재설정 완료: {email}")
+        return jsonify({"status": True, "statusCode": 200, "message": "비밀번호가 재설정되었습니다.", "data": None}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": False, "statusCode": 500, "message": str(e), "data": None}), 500
 
 @app.route("/api/auth/logout", methods=["POST"])
 def logout():
